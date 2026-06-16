@@ -1,0 +1,92 @@
+[
+  {
+    "id": "calc-basic-add",
+    "prompt": "What is 23 plus 19?",
+    "expect_substrings": ["42"],
+    "expect_tool": "calculator"
+  },
+  {
+    "id": "calc-multiply",
+    "prompt": "Calculate 23 times 17.",
+    "expect_substrings": ["391"],
+    "expect_tool": "calculator"
+  },
+  {
+    "id": "calc-mixed",
+    "prompt": "Compute 100 - 36 divided by 4.",
+    "expect_substrings": ["91"],
+    "expect_tool": "calculator"
+  },
+  {
+    "id": "calc-parens",
+    "prompt": "What is (12 + 8) times 5?",
+    "expect_substrings": ["100"],
+    "expect_tool": "calculator"
+  },
+  {
+    "id": "calc-percent",
+    "prompt": "What is 250 times 4?",
+    "expect_substrings": ["1000"],
+    "expect_tool": "calculator"
+  },
+  {
+    "id": "search-france",
+    "prompt": "Search for the capital of France.",
+    "expect_substrings": ["Paris"],
+    "expect_tool": "web_search"
+  },
+  {
+    "id": "search-japan",
+    "prompt": "What is the capital of Japan?",
+    "expect_substrings": ["Tokyo"],
+    "expect_tool": "web_search"
+  },
+  {
+    "id": "search-mountain",
+    "prompt": "Search for the tallest mountain on Earth.",
+    "expect_substrings": ["Everest"],
+    "expect_tool": "web_search"
+  },
+  {
+    "id": "search-light",
+    "prompt": "What is the speed of light?",
+    "expect_substrings": ["299,792"],
+    "expect_tool": "web_search"
+  },
+  {
+    "id": "search-python",
+    "prompt": "Who is the creator of Python? Please search.",
+    "expect_substrings": ["Guido"],
+    "expect_tool": "web_search"
+  },
+  {
+    "id": "datetime-current",
+    "prompt": "What is today's date?",
+    "expect_substrings": ["-"],
+    "expect_tool": "datetime"
+  },
+  {
+    "id": "calc-large",
+    "prompt": "Calculate 999 plus 1.",
+    "expect_substrings": ["1000"],
+    "expect_tool": "calculator"
+  },
+  {
+    "id": "calc-subtract",
+    "prompt": "What is 500 minus 123?",
+    "expect_substrings": ["377"],
+    "expect_tool": "calculator"
+  },
+  {
+    "id": "calc-divide",
+    "prompt": "What is 144 divided by 12?",
+    "expect_substrings": ["12"],
+    "expect_tool": "calculator"
+  },
+  {
+    "id": "search-unknown",
+    "prompt": "Search for the capital of France please.",
+    "expect_substrings": ["Paris"],
+    "expect_tool": "web_search"
+  }
+]
