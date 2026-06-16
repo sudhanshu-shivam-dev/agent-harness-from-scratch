@@ -1,0 +1,9 @@
+# Core runtime dependency: NumPy powers the in-memory vector store.
+numpy>=1.24
+
+# Optional: only needed to run against a real model via OpenAILLM.
+# The repo runs fully (and CI passes) without this, using MockLLM.
+openai>=1.0 ; python_version >= "3.8"
+
+# Dev / test
+pytest>=7.0
