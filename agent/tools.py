@@ -17,6 +17,15 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
 
 
+# Tool risk vocabulary — from Harness-Bench (2025) harness engineering research.
+# Labels inform the harness of each tool's impact level; WRITE/DESTRUCTIVE
+# annotations are surfaced in the LLM description so the model can reason about
+# side-effects before calling.
+RISK_READ = "read"          # safe, idempotent, no side-effects
+RISK_WRITE = "write"        # modifies state, but reversible
+RISK_DESTRUCTIVE = "destructive"  # irreversible or high-impact
+
+
 # Map Python types to JSON-schema primitive types.
 _PY_TO_JSON: Dict[Any, str] = {
     str: "string",
@@ -79,10 +88,14 @@ class BaseTool(ABC):
     Concrete tools must set :attr:`name`/:attr:`description`, implement
     :meth:`run`, and provide a JSON-schema ``parameters`` block via
     :meth:`parameters_schema`.
+
+    Set :attr:`risk` to one of :data:`RISK_READ`, :data:`RISK_WRITE`, or
+    :data:`RISK_DESTRUCTIVE` to annotate the tool's side-effect profile.
     """
 
     name: str = ""
     description: str = ""
+    risk: str = RISK_READ
 
     @abstractmethod
     def run(self, **kwargs: Any) -> str:
@@ -96,12 +109,16 @@ class BaseTool(ABC):
     def to_schema(self) -> Dict[str, Any]:
         """Return the OpenAI-style ``function`` tool schema."""
 
+        desc = self.description
+        if self.risk in (RISK_WRITE, RISK_DESTRUCTIVE):
+            desc = f"[{self.risk.upper()}] {desc}"
         return {
             "type": "function",
             "function": {
                 "name": self.name,
-                "description": self.description,
+                "description": desc,
                 "parameters": self.parameters_schema(),
+                "x_risk": self.risk,
             },
         }
 
@@ -113,11 +130,17 @@ class FunctionTool(BaseTool):
     drive the auto-generated JSON schema.
     """
 
-    def __init__(self, func: Callable[..., Any], name: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        func: Callable[..., Any],
+        name: Optional[str] = None,
+        risk: str = RISK_READ,
+    ) -> None:
         self._func = func
         self.name = name or func.__name__
         summary, param_docs = _parse_docstring(func.__doc__)
         self.description = summary or self.name
+        self.risk = risk
         self._param_docs = param_docs
         self._signature = inspect.signature(func)
         try:
@@ -147,7 +170,7 @@ class FunctionTool(BaseTool):
         return str(self._func(**kwargs))
 
 
-def tool(name_or_func: Any = None) -> Any:
+def tool(name_or_func: Any = None, *, risk: str = RISK_READ) -> Any:
     """Decorator that turns a function into a :class:`FunctionTool`.
 
     Usage::
@@ -160,13 +183,17 @@ def tool(name_or_func: Any = None) -> Any:
         @tool("web_search")
         def search(query: str) -> str:
             ...
+
+        @tool(risk=RISK_WRITE)
+        def write_file(path: str, content: str) -> str:
+            ...
     """
 
     if callable(name_or_func):
-        return FunctionTool(name_or_func)
+        return FunctionTool(name_or_func, risk=risk)
 
     def decorator(func: Callable[..., Any]) -> FunctionTool:
-        return FunctionTool(func, name=name_or_func)
+        return FunctionTool(func, name=name_or_func, risk=risk)
 
     return decorator
 

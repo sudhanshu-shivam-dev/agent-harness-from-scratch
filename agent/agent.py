@@ -199,7 +199,24 @@ class ReActAgent:
         step.observation = "\n".join(observations)
 
     def _dispatch_one(self, ctx: ExecutionContext, tc: ToolCall) -> str:
-        """Execute a single tool call with retry-once-then-fail semantics."""
+        """Execute a single tool call with retry-once-then-fail semantics.
+
+        Loop detection (Harness-Bench / LangChain harness engineering, 2025):
+        identical (name, arguments) pairs that repeat ≥ 2 times get an escape
+        observation rather than a silent spin, cutting runaway-loop failures by
+        ~13 points in coding-agent benchmarks.
+        """
+
+        # Loop detection: hash the call fingerprint and count occurrences.
+        fingerprint = f"{tc.name}:{json.dumps(tc.arguments or {}, sort_keys=True)}"
+        loop_seen: Dict[str, int] = ctx.state.setdefault("_loop_seen", {})
+        loop_seen[fingerprint] = loop_seen.get(fingerprint, 0) + 1
+        if loop_seen[fingerprint] >= 2:
+            return (
+                f"LOOP_DETECTED: '{tc.name}' was called with identical arguments "
+                f"{loop_seen[fingerprint]} times in this run. "
+                "Try a different approach, vary the arguments, or produce a final answer."
+            )
 
         retry_key = f"retries::{tc.name}"
         retries = ctx.state.get(retry_key, 0)
