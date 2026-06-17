@@ -4,6 +4,12 @@ A minimal, production-shaped **ReAct agent framework** built from first principl
 
 [![CI](https://github.com/sudhanshu-shivam-dev/agent-harness-from-scratch/actions/workflows/ci.yml/badge.svg)](https://github.com/sudhanshu-shivam-dev/agent-harness-from-scratch/actions/workflows/ci.yml)
 
+## Live demo
+
+An interactive **ReAct Agent Playground** that visualizes the think → act →
+observe loop in the browser: <!-- TODO: paste your published demo URL here -->
+**_(coming soon)_**.
+
 ## Why this exists
 
 Most "agent" projects wire together a framework and call it a day. This one implements the pieces that actually matter in production:
