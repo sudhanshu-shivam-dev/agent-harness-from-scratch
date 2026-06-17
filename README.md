@@ -8,7 +8,8 @@ A minimal, production-shaped **ReAct agent framework** built from first principl
 
 An interactive **ReAct Agent Playground** that visualizes the think → act →
 observe loop in the browser: <!-- TODO: paste your published demo URL here -->
-**_(coming soon)_**.
+**_(coming soon)_**. Source lives in [`web/`](web/) — run it locally with
+`cd web && npm install && npm run dev`.
 
 ## See it in action
 
