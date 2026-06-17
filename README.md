@@ -10,6 +10,17 @@ An interactive **ReAct Agent Playground** that visualizes the think → act →
 observe loop in the browser: <!-- TODO: paste your published demo URL here -->
 **_(coming soon)_**.
 
+## See it in action
+
+The agent reasoning and calling tools (`python examples/basic_tools.py`):
+
+![Agent reasoning and calling tools](docs/agent-run.png)
+
+The evaluation harness scoring the agent over the sample tasks
+(`python examples/run_eval.py`) — runs on the zero-dependency mock LLM:
+
+![Eval scorecard](docs/eval-scorecard.png)
+
 ## Why this exists
 
 Most "agent" projects wire together a framework and call it a day. This one implements the pieces that actually matter in production:
@@ -29,24 +40,20 @@ through every iteration and owns all mutable state (messages, scratch state, the
 step-by-step trajectory, and the token/step budget). Tools are typed and
 self-describing; memory is layered into short-term and long-term.
 
-```
-                         ┌──────────────────────────────────────────┐
-                         │            ExecutionContext               │
-                         │  messages · state · steps[] · budget      │
-                         └──────────────────────────────────────────┘
-                                   ▲            │
-            (1) think              │            │  records thought/action/observation
-            LLM call ──────────────┘            ▼
-       ┌─────────────┐      tool_calls?    ┌──────────────┐
-  ───▶ │  ReActAgent │ ───── yes ────────▶ │  act()       │ ── dispatch ──▶ ToolRegistry
-       │  .step()    │                     │  observe     │ ◀── observation ─┘
-       └─────────────┘ ◀──── loop ─────────└──────────────┘
-            │  no (final answer) or budget exhausted
-            ▼
-        AgentResult (answer · success · steps · tokens · trajectory)
-
-  ShortTermMemory  ──▶ window + summarization feeds each think() call
-  LongTermMemory   ──▶ cosine-similarity recall primes the prompt
+```mermaid
+flowchart TD
+    U(["User task"]) --> R["ReActAgent.run()"]
+    R --> CTX[("ExecutionContext<br/>messages · state<br/>steps · budget")]
+    LTM["LongTermMemory<br/>(vector recall)"] -.primes prompt.-> R
+    R --> T{"think()<br/>LLM call"}
+    STM["ShortTermMemory<br/>window + summary"] -.manages context.-> T
+    T -->|tool calls| A["act()<br/>dispatch + observe"]
+    A --> REG["ToolRegistry"]
+    REG -->|observation| A
+    A -->|loop| T
+    A -.records step.-> CTX
+    T -->|final answer| F(["AgentResult<br/>answer · steps · tokens"])
+    CTX -.budget guard stops loop.-> F
 ```
 
 Each loop iteration:
