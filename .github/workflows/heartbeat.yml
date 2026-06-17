@@ -1,0 +1,35 @@
+name: Heartbeat — push every 6 hours
+
+on:
+  schedule:
+    # Every 6 hours at :00 (00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/epic-wright-qmqbik
+
+      - name: Write timestamp
+        run: |
+          TS=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          mkdir -p docs
+          # Rebuild the table with a new row prepended after the header rows
+          HEADER=$(head -6 docs/heartbeat.md)
+          NEW_ROW="| ${TS} | Sudhanshu Shivam |"
+          printf '%s\n%s\n' "$HEADER" "$NEW_ROW" > docs/heartbeat.md
+
+      - name: Commit and push
+        run: |
+          git config user.name  "Sudhanshu Shivam"
+          git config user.email "shivam.sudhanshu.dev@gmail.com"
+          git add docs/heartbeat.md
+          git commit -m "chore: heartbeat update by Sudhanshu Shivam [scheduled]"
+          git push origin claude/epic-wright-qmqbik
