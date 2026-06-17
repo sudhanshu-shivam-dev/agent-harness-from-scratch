@@ -104,6 +104,14 @@ _MOCK_SEARCH_KB: Dict[str, str] = {
     "python creator": "Python was created by Guido van Rossum.",
 }
 
+# Dropped from mock embeddings so similarity reflects content words.
+_EMBED_STOPWORDS = {
+    "a", "an", "the", "is", "are", "was", "were", "be", "of", "to", "in", "on",
+    "for", "and", "or", "with", "as", "at", "by", "from", "this", "that", "it",
+    "what", "which", "who", "how", "when", "where", "why", "do", "does", "did",
+    "about", "tell", "me", "my", "your", "i", "you",
+}
+
 _WORD_OPS = {
     "plus": "+",
     "add": "+",
@@ -182,12 +190,15 @@ class MockLLM(BaseLLM):
         """Deterministic hashing bag-of-words embedding (256 dims).
 
         Not semantically rich, but stable and dependency-free, which is all the
-        in-memory vector store needs for a runnable demo.
+        in-memory vector store needs for a runnable demo. Common stopwords are
+        dropped so similarity is driven by content words, not "the"/"is".
         """
 
         dims = 256
         vec = [0.0] * dims
         for token in re.findall(r"\w+", text.lower()):
+            if token in _EMBED_STOPWORDS:
+                continue
             h = int(hashlib.md5(token.encode()).hexdigest(), 16)
             vec[h % dims] += 1.0
         norm = math.sqrt(sum(v * v for v in vec))

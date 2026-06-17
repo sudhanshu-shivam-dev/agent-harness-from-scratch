@@ -12,6 +12,7 @@ Public surface:
 """
 
 from .agent import AgentResult, ReActAgent
+from .compression import CompressionResult, ContextCompressor
 from .context import ExecutionContext, Step
 from .llm import BaseLLM, LLMResponse, MockLLM, OpenAILLM, ToolCall, Usage
 from .memory import LongTermMemory, ShortTermMemory
@@ -32,6 +33,8 @@ __all__ = [
     "Usage",
     "ShortTermMemory",
     "LongTermMemory",
+    "ContextCompressor",
+    "CompressionResult",
     "BaseTool",
     "FunctionTool",
     "ToolRegistry",

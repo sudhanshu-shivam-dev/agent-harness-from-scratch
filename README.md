@@ -29,6 +29,7 @@ Most "agent" projects wire together a framework and call it a day. This one impl
 - **ExecutionContext** — owns state, step history, and a token/step budget
 - **Tool abstraction** — a `@tool` decorator that auto-generates JSON schemas from function signatures
 - **Memory** — short-term context management (window + summarization) and long-term vector recall
+- **Context compression** — query-aware compression that shrinks the input before the LLM call, inspired by recent long-context research
 - **Guardrails** — max-step limits, finish/confidence checks, and safe handling of malformed tool calls
 - **Evaluation harness** — runs the agent over a task set, logs full trajectories, and scores with rule-based + LLM-as-judge
 
@@ -39,23 +40,10 @@ It runs **with zero setup and no API key** thanks to a deterministic `MockLLM`, 
 The agent is a `think → act → observe` loop. A single `ExecutionContext` threads
 through every iteration and owns all mutable state (messages, scratch state, the
 step-by-step trajectory, and the token/step budget). Tools are typed and
-self-describing; memory is layered into short-term and long-term.
+self-describing; memory is layered into short-term and long-term; and an optional
+context compressor shrinks the input before each LLM call.
 
-```mermaid
-flowchart TD
-    U(["User task"]) --> R["ReActAgent.run()"]
-    R --> CTX[("ExecutionContext<br/>messages · state<br/>steps · budget")]
-    LTM["LongTermMemory<br/>(vector recall)"] -.primes prompt.-> R
-    R --> T{"think()<br/>LLM call"}
-    STM["ShortTermMemory<br/>window + summary"] -.manages context.-> T
-    T -->|tool calls| A["act()<br/>dispatch + observe"]
-    A --> REG["ToolRegistry"]
-    REG -->|observation| A
-    A -->|loop| T
-    A -.records step.-> CTX
-    T -->|final answer| F(["AgentResult<br/>answer · steps · tokens"])
-    CTX -.budget guard stops loop.-> F
-```
+![Architecture](docs/architecture.png)
 
 Each loop iteration:
 
@@ -114,9 +102,39 @@ being force-stopped) and an optional **LLM-as-judge** pass for open-ended
 answers. Numbers above are from the deterministic mock; with a real model they
 reflect that model's quality.
 
-## Design notes
+## Context compression
 
-> The notes below are a starting point — edit them in your own voice.
+Long-context agents waste most of their tokens re-sending tool outputs and
+documents the model has already seen. Recent research shows that aggressively
+compressing the input *before* it reaches the model preserves task accuracy while
+cutting compute and latency — *Latent Context Language Models* (Chari et al.,
+2025) report up to **16× compression** by compressing the input sequence ahead of
+the decoder, and *ACON* targets this for long-horizon LLM agents specifically.
+
+`ContextCompressor` implements a lightweight, model-free approximation of that
+idea: a **selective, query-aware extractive compressor**. It splits context into
+units, scores each for relevance to the current query, and keeps only the
+highest-value units up to a target ratio — no trained encoder, fully
+deterministic, zero extra dependencies.
+
+```python
+from agent import ContextCompressor
+
+compressor = ContextCompressor(target_ratio=4.0)
+result = compressor.compress(long_document, query="Why were there shipping delays?")
+print(result.summary())   # e.g. "229->58 tokens (3.9x, kept 3/12 units)"
+```
+
+Wire it into an agent and it transparently compresses large message bodies before
+each `think()` call:
+
+```python
+agent = ReActAgent(llm=..., tools=..., compressor=ContextCompressor(target_ratio=4.0))
+```
+
+See `examples/context_compression.py` for a runnable demo.
+
+## Design notes
 
 **Why ReAct.** Interleaving reasoning and acting keeps the agent grounded: every
 action produces an observation that conditions the next thought, which is far
@@ -144,29 +162,43 @@ relevant facts from *past* runs and primes the system prompt. Splitting them
 mirrors how production agents separate "what's in this conversation" from "what
 we've learned over time."
 
+**Why compress context.** Token cost and latency in agent loops are dominated by
+re-sending history and tool outputs. Compressing the input before the model call
+— rather than only summarizing across turns — keeps the budget flat as
+trajectories grow. The compressor lives behind a small `compress()` interface, so
+the model-free extractive implementation here can be swapped for a trained
+encoder (the approach the LCLM/ACON papers take) without touching the agent.
+
 **What I'd change to scale this.** Make tool dispatch async so independent calls
 run concurrently; replace the in-memory NumPy store with a real vector DB
-(FAISS/Qdrant/pgvector) and persist it; add streaming and partial-result
-handling; and introduce a planner/executor split for multi-step tasks so a
-higher-level agent decomposes work and delegates to focused sub-agents.
+(FAISS/Qdrant/pgvector) and persist it; swap the extractive compressor for a
+trained context encoder; add streaming and partial-result handling; and introduce
+a planner/executor split for multi-step tasks so a higher-level agent decomposes
+work and delegates to focused sub-agents.
 
 ## Project layout
 
 ```
 agent/
-  context.py     ExecutionContext: messages, state, step history, token budget
-  tools.py       BaseTool + @tool decorator (auto JSON schema) + ToolRegistry
-  memory.py      short-term (window/summary) + long-term (vector) memory
-  llm.py         LLM client wrapper: MockLLM (offline) + OpenAILLM (real)
-  agent.py       ReActAgent: run()/step()/think()/act() loop + guardrails
+  context.py       ExecutionContext: messages, state, step history, token budget
+  tools.py         BaseTool + @tool decorator (auto JSON schema) + ToolRegistry
+  memory.py        short-term (window/summary) + long-term (vector) memory
+  compression.py   ContextCompressor: query-aware context compression
+  llm.py           LLM client wrapper: MockLLM (offline) + OpenAILLM (real)
+  agent.py         ReActAgent: run()/step()/think()/act() loop + guardrails
   eval/
-    harness.py   runs the agent over tasks, logs trajectories, scores
-    tasks.json   sample eval tasks with expected outcomes
+    harness.py     runs the agent over tasks, logs trajectories, scores
+    tasks.json     sample eval tasks with expected outcomes
 examples/
-  basic_tools.py calculator + web-search-stub + datetime tools
-  run_eval.py    runs the eval harness and prints a scorecard
+  basic_tools.py         calculator + web-search-stub + datetime tools
+  context_compression.py query-aware context compression demo
+  memory_demo.py         long-term vector memory recall demo
+  run_eval.py            runs the eval harness and prints a scorecard
 tests/
-  test_agent.py  unit + integration tests (run entirely on MockLLM)
+  test_agent.py          unit + integration tests (run entirely on MockLLM)
+  test_compression.py    tests for the context compressor
+web/
+  ReAct Agent Playground — interactive browser demo (Vite + React + TS)
 ```
 
 ## Roadmap
@@ -174,6 +206,7 @@ tests/
 - [ ] Async multi-agent orchestration (planner/executor)
 - [ ] MCP tool integration
 - [ ] Persistent vector memory (FAISS/Qdrant)
+- [ ] Trained context encoder (LCLM/ACON-style) behind the compressor interface
 
 ## License
 

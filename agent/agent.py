@@ -20,6 +20,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from .compression import ContextCompressor
 from .context import ExecutionContext, Step
 from .llm import BaseLLM, LLMResponse, ToolCall
 from .memory import LongTermMemory, ShortTermMemory
@@ -56,6 +57,7 @@ class ReActAgent:
         max_tokens: int = 100_000,
         short_term: Optional[ShortTermMemory] = None,
         long_term: Optional[LongTermMemory] = None,
+        compressor: Optional[ContextCompressor] = None,
         max_tool_retries: int = 1,
     ) -> None:
         self.llm = llm
@@ -65,6 +67,7 @@ class ReActAgent:
         self.max_tokens = max_tokens
         self.short_term = short_term or ShortTermMemory(llm)
         self.long_term = long_term
+        self.compressor = compressor
         self.max_tool_retries = max_tool_retries
 
     # -- public API -------------------------------------------------------
@@ -132,12 +135,30 @@ class ReActAgent:
 
     # -- think ------------------------------------------------------------
     def think(self, ctx: ExecutionContext) -> LLMResponse:
-        """One LLM call. Applies short-term memory management and budgeting."""
+        """One LLM call.
+
+        Applies short-term memory management, optional query-aware context
+        compression (shrinking large message bodies before they reach the model),
+        and token budgeting.
+        """
 
         managed = self.short_term.manage(ctx.messages)
+        if self.compressor is not None:
+            query = self._latest_user(ctx)
+            managed, saved = self.compressor.compress_messages(managed, query)
+            ctx.state["tokens_saved_by_compression"] = (
+                ctx.state.get("tokens_saved_by_compression", 0) + saved
+            )
         response = self.llm.chat(managed, tools=self.tools.schemas())
         ctx.add_tokens(response.usage.total_tokens)
         return response
+
+    @staticmethod
+    def _latest_user(ctx: ExecutionContext) -> str:
+        for msg in reversed(ctx.messages):
+            if msg.get("role") == "user":
+                return str(msg.get("content") or "")
+        return ""
 
     # -- act --------------------------------------------------------------
     def act(self, ctx: ExecutionContext, step: Step, tool_calls: List[ToolCall]) -> None:
