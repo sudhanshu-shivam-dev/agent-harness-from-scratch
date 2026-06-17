@@ -22,6 +22,11 @@ The evaluation harness scoring the agent over the sample tasks
 
 ![Eval scorecard](docs/eval-scorecard.png)
 
+Query-aware context compression shrinking a document before the LLM call
+(`python examples/context_compression.py`):
+
+![Context compression](docs/context-compression.png)
+
 ## Why this exists
 
 Most "agent" projects wire together a framework and call it a day. This one implements the pieces that actually matter in production:
