@@ -4,12 +4,19 @@ A minimal, production-shaped **ReAct agent framework** built from first principl
 
 [![CI](https://github.com/sudhanshu-shivam-dev/agent-harness-from-scratch/actions/workflows/ci.yml/badge.svg)](https://github.com/sudhanshu-shivam-dev/agent-harness-from-scratch/actions/workflows/ci.yml)
 
+![ReAct Agent Playground](docs/app-trajectory.png)
+
+> The interactive **ReAct Agent Playground** — watch the agent think, call a tool,
+> observe the result, and answer, with live run stats. Source in [`web/`](web/).
+
 ## Live demo
 
 An interactive **ReAct Agent Playground** that visualizes the think → act →
 observe loop in the browser: <!-- TODO: paste your published demo URL here -->
 **_(coming soon)_**. Source lives in [`web/`](web/) — run it locally with
 `cd web && npm install && npm run dev`.
+
+![Playground — initial state](docs/app-home.png)
 
 ## See it in action
 
