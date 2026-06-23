@@ -36,6 +36,7 @@ class TaskResult:
     rule_pass: bool
     judge_pass: Optional[bool]
     used_expected_tool: Optional[bool]
+    trajectory_score: float
     steps: int
     tokens: int
     stop_reason: str
@@ -50,7 +51,9 @@ class Scorecard:
     successes: int
     avg_steps: float
     avg_tokens: float
+    avg_trajectory_score: float
     judge_successes: Optional[int]
+    judge_rule_agreement: Optional[float]
     results: List[TaskResult] = field(default_factory=list)
 
     @property
@@ -61,28 +64,34 @@ class Scorecard:
         """Return a printable scorecard string."""
 
         lines = [
-            "=" * 52,
+            "=" * 58,
             "EVAL SCORECARD",
-            "=" * 52,
-            f"{'Task':<22}{'rule':<7}{'judge':<7}{'steps':<7}{'tokens':<7}",
-            "-" * 52,
+            "=" * 58,
+            f"{'Task':<22}{'rule':<6}{'judge':<7}{'traj':<7}{'steps':<7}{'tokens':<7}",
+            "-" * 58,
         ]
         for r in self.results:
             judge = "-" if r.judge_pass is None else ("ok" if r.judge_pass else "x")
             rule = "ok" if r.rule_pass else "x"
             lines.append(
-                f"{r.task_id:<22}{rule:<7}{judge:<7}{r.steps:<7}{r.tokens:<7}"
+                f"{r.task_id:<22}{rule:<6}{judge:<7}"
+                f"{r.trajectory_score:<7.2f}{r.steps:<7}{r.tokens:<7}"
             )
-        lines.append("-" * 52)
+        lines.append("-" * 58)
         lines.append(f"Success rate (rule): {self.success_rate:.0%} "
                      f"({self.successes}/{self.total})")
         if self.judge_successes is not None:
             jr = self.judge_successes / self.total if self.total else 0.0
             lines.append(f"Success rate (judge): {jr:.0%} "
                          f"({self.judge_successes}/{self.total})")
+        if self.judge_rule_agreement is not None:
+            # Judge/rule agreement is a cheap calibration proxy: a judge that
+            # rarely agrees with the deterministic check is adding noise.
+            lines.append(f"Judge/rule agreement: {self.judge_rule_agreement:.0%}")
+        lines.append(f"Avg trajectory score: {self.avg_trajectory_score:.2f}")
         lines.append(f"Avg steps/task:  {self.avg_steps:.2f}")
         lines.append(f"Avg tokens/task: {self.avg_tokens:.1f}")
-        lines.append("=" * 52)
+        lines.append("=" * 58)
         return "\n".join(lines)
 
 
@@ -113,6 +122,7 @@ class EvalHarness:
 
             rule_pass = self._rule_score(task, outcome)
             used_tool = self._used_expected_tool(task, outcome)
+            traj_score = self._trajectory_score(task, outcome)
             judge_pass = self._judge_score(task, outcome) if self.judge_llm else None
 
             results.append(
@@ -123,6 +133,7 @@ class EvalHarness:
                     rule_pass=rule_pass,
                     judge_pass=judge_pass,
                     used_expected_tool=used_tool,
+                    trajectory_score=traj_score,
                     steps=outcome.steps,
                     tokens=outcome.tokens,
                     stop_reason=outcome.stop_reason,
@@ -154,6 +165,34 @@ class EvalHarness:
                 return True
         return False
 
+    @staticmethod
+    def _trajectory_score(task: Dict[str, Any], outcome: AgentResult) -> float:
+        """Score *how* the agent got to the answer, not just the final output.
+
+        Averages three trajectory-level signals: it finished cleanly, it used the
+        expected tool (when specified), and no step produced a tool error. This
+        catches "right answer via the wrong path" cases that output-only scoring
+        misses.
+        """
+
+        components: List[float] = []
+        components.append(1.0 if outcome.stop_reason == "finished" else 0.0)
+
+        expected = task.get("expect_tool")
+        if expected:
+            used = any(
+                (s.get("action") or {}).get("name") == expected
+                for s in outcome.trajectory
+            )
+            components.append(1.0 if used else 0.0)
+
+        had_error = any(
+            (s.get("observation") or "").startswith("ERROR") for s in outcome.trajectory
+        )
+        components.append(0.0 if had_error else 1.0)
+
+        return sum(components) / len(components)
+
     def _judge_score(self, task: Dict[str, Any], outcome: AgentResult) -> bool:
         assert self.judge_llm is not None
         prompt = [
@@ -176,16 +215,26 @@ class EvalHarness:
         successes = sum(1 for r in results if r.rule_pass)
         avg_steps = sum(r.steps for r in results) / total if total else 0.0
         avg_tokens = sum(r.tokens for r in results) / total if total else 0.0
+        avg_traj = (
+            sum(r.trajectory_score for r in results) / total if total else 0.0
+        )
         judged = [r for r in results if r.judge_pass is not None]
         judge_successes = (
             sum(1 for r in judged if r.judge_pass) if judged else None
+        )
+        judge_rule_agreement = (
+            sum(1 for r in judged if r.judge_pass == r.rule_pass) / len(judged)
+            if judged
+            else None
         )
         return Scorecard(
             total=total,
             successes=successes,
             avg_steps=avg_steps,
             avg_tokens=avg_tokens,
+            avg_trajectory_score=avg_traj,
             judge_successes=judge_successes,
+            judge_rule_agreement=judge_rule_agreement,
             results=results,
         )
 
@@ -200,7 +249,9 @@ def dump_results(scorecard: Scorecard, path: str) -> None:
             "success_rate": scorecard.success_rate,
             "avg_steps": scorecard.avg_steps,
             "avg_tokens": scorecard.avg_tokens,
+            "avg_trajectory_score": scorecard.avg_trajectory_score,
             "judge_successes": scorecard.judge_successes,
+            "judge_rule_agreement": scorecard.judge_rule_agreement,
         },
         "results": [asdict(r) for r in scorecard.results],
     }

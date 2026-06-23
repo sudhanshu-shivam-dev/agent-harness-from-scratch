@@ -22,8 +22,9 @@ from typing import Any, Dict, List, Optional
 
 from .compression import ContextCompressor
 from .context import ExecutionContext, Step
-from .llm import BaseLLM, LLMResponse, ToolCall
+from .llm import BaseLLM, LLMResponse, ToolCall, estimate_tokens
 from .memory import LongTermMemory, ShortTermMemory
+from .safety import ToolOutputGuard
 from .tools import ToolRegistry
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -58,6 +59,8 @@ class ReActAgent:
         short_term: Optional[ShortTermMemory] = None,
         long_term: Optional[LongTermMemory] = None,
         compressor: Optional[ContextCompressor] = None,
+        output_guard: Optional[ToolOutputGuard] = None,
+        compress_at_fraction: float = 0.6,
         max_tool_retries: int = 1,
     ) -> None:
         self.llm = llm
@@ -68,6 +71,10 @@ class ReActAgent:
         self.short_term = short_term or ShortTermMemory(llm)
         self.long_term = long_term
         self.compressor = compressor
+        # Compress only once the prompt approaches this fraction of the token
+        # budget -- i.e. at the budget boundary, not on every small call.
+        self.compress_at_fraction = compress_at_fraction
+        self.output_guard = output_guard
         self.max_tool_retries = max_tool_retries
 
     # -- public API -------------------------------------------------------
@@ -143,7 +150,7 @@ class ReActAgent:
         """
 
         managed = self.short_term.manage(ctx.messages)
-        if self.compressor is not None:
+        if self.compressor is not None and self._near_budget(managed):
             query = self._latest_user(ctx)
             managed, saved = self.compressor.compress_messages(managed, query)
             ctx.state["tokens_saved_by_compression"] = (
@@ -152,6 +159,14 @@ class ReActAgent:
         response = self.llm.chat(managed, tools=self.tools.schemas())
         ctx.add_tokens(response.usage.total_tokens)
         return response
+
+    def _near_budget(self, messages: List[Dict[str, Any]]) -> bool:
+        """True once the prompt crosses the configured fraction of the budget."""
+
+        prompt_tokens = sum(
+            estimate_tokens(str(m.get("content") or "")) for m in messages
+        )
+        return prompt_tokens >= self.compress_at_fraction * self.max_tokens
 
     @staticmethod
     def _latest_user(ctx: ExecutionContext) -> str:
@@ -189,6 +204,15 @@ class ReActAgent:
         observations: List[str] = []
         for tc in tool_calls:
             observation = self._dispatch_one(ctx, tc)
+            # Tool output is untrusted input: screen it for prompt injection
+            # before it ever reaches the model's context.
+            if self.output_guard is not None:
+                scan = self.output_guard.scan(observation)
+                if scan.suspicious:
+                    observation = scan.sanitized
+                    ctx.state["injection_flags"] = (
+                        ctx.state.get("injection_flags", 0) + len(scan.matches)
+                    )
             observations.append(observation)
             ctx.add_message("tool", observation, tool_call_id=tc.id, name=tc.name)
 

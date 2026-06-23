@@ -43,7 +43,9 @@ Most "agent" projects wire together a framework and call it a day. This one impl
 - **Memory** — short-term context management (window + summarization) and long-term vector recall
 - **Context compression** — query-aware compression that shrinks the input before the LLM call, inspired by recent long-context research
 - **Guardrails** — max-step limits, finish/confidence checks, and safe handling of malformed tool calls
-- **Evaluation harness** — runs the agent over a task set, logs full trajectories, and scores with rule-based + LLM-as-judge
+- **Tool-output safety** — an injection guard that screens untrusted tool output for indirect prompt injection
+- **Observability** — a run id and per-step correlation ids thread through `ExecutionContext`
+- **Evaluation harness** — runs the agent over a task set, logs full trajectories, and scores with rule-based, **trajectory-level**, and optional LLM-as-judge
 
 It runs **with zero setup and no API key** thanks to a deterministic `MockLLM`, and switches to a real model when `OPENAI_API_KEY` is provided.
 
@@ -108,11 +110,34 @@ Run `python examples/run_eval.py` to score the agent over the sample tasks
 | Avg steps/task | 2.00 |
 | Avg tokens/task | ~253 |
 
-Scoring is two-layered: a **rule-based** check (expected substrings present, the
-expected tool was actually invoked, and the agent finished cleanly rather than
-being force-stopped) and an optional **LLM-as-judge** pass for open-ended
-answers. Numbers above are from the deterministic mock; with a real model they
-reflect that model's quality.
+Scoring is layered:
+
+- **Rule-based** — expected substrings present, the expected tool was actually
+  invoked, and the agent finished cleanly rather than being force-stopped.
+- **Trajectory score** — grades *how* the answer was reached (finished cleanly,
+  used the expected tool, no tool errors), not just the final output. This
+  catches "right answer via the wrong path" that output-only scoring misses.
+- **LLM-as-judge** (optional) — for open-ended answers, with a judge/rule
+  **agreement** metric reported as a cheap calibration proxy.
+
+Numbers above are from the deterministic mock; with a real model they reflect
+that model's quality.
+
+## Tool-output safety
+
+Tool results are untrusted input — a web page or API response can carry text like
+*"ignore your previous instructions and …"*. Left unchecked, that flows into the
+model's context as **indirect prompt injection**. `ToolOutputGuard` gives the
+agent a single choke point: it screens every observation for injection directives
+and neutralizes them before they reach the model.
+
+```python
+from agent import ReActAgent, ToolOutputGuard
+
+agent = ReActAgent(llm=..., tools=..., output_guard=ToolOutputGuard())
+```
+
+See `examples/prompt_injection.py` for a before/after demo.
 
 ## Context compression
 
@@ -181,6 +206,17 @@ trajectories grow. The compressor lives behind a small `compress()` interface, s
 the model-free extractive implementation here can be swapped for a trained
 encoder (the approach the LCLM/ACON papers take) without touching the agent.
 
+**Treat tool output as untrusted.** Anything a tool returns may be
+attacker-controlled, so the agent funnels every observation through one guard
+before it reaches the model. Centralizing it (rather than sprinkling checks
+through tools) means there's a single place to harden and test the boundary.
+
+**Score trajectories, not just outputs.** A correct final answer reached via the
+wrong tool, an error it recovered from, or a lucky guess all look identical to
+output-only scoring. Grading the trajectory — did it finish cleanly, use the
+right tool, avoid errors — is what makes the eval harness catch regressions
+instead of vibe-checking behavior.
+
 **What I'd change to scale this.** Make tool dispatch async so independent calls
 run concurrently; replace the in-memory NumPy store with a real vector DB
 (FAISS/Qdrant/pgvector) and persist it; swap the extractive compressor for a
@@ -196,29 +232,36 @@ agent/
   tools.py         BaseTool + @tool decorator (auto JSON schema) + ToolRegistry
   memory.py        short-term (window/summary) + long-term (vector) memory
   compression.py   ContextCompressor: query-aware context compression
+  safety.py        ToolOutputGuard: indirect prompt-injection defense
   llm.py           LLM client wrapper: MockLLM (offline) + OpenAILLM (real)
   agent.py         ReActAgent: run()/step()/think()/act() loop + guardrails
   eval/
-    harness.py     runs the agent over tasks, logs trajectories, scores
+    harness.py     runs tasks; rule-based + trajectory + LLM-as-judge scoring
     tasks.json     sample eval tasks with expected outcomes
 examples/
   basic_tools.py         calculator + web-search-stub + datetime tools
   context_compression.py query-aware context compression demo
+  prompt_injection.py    tool-output injection guard before/after demo
   memory_demo.py         long-term vector memory recall demo
   run_eval.py            runs the eval harness and prints a scorecard
 tests/
   test_agent.py          unit + integration tests (run entirely on MockLLM)
   test_compression.py    tests for the context compressor
+  test_safety.py         tests for the prompt-injection guard
 web/
   ReAct Agent Playground — interactive browser demo (Vite + React + TS)
 ```
 
 ## Roadmap
 
+- [x] Trajectory-level eval scoring + judge/rule calibration
+- [x] Indirect prompt-injection defense for tool output
+- [x] Correlation ids through the execution context
 - [ ] Async multi-agent orchestration (planner/executor)
 - [ ] MCP tool integration
 - [ ] Persistent vector memory (FAISS/Qdrant)
 - [ ] Trained context encoder (LCLM/ACON-style) behind the compressor interface
+- [ ] Per-task regression suite generated from production failures
 
 ## License
 

@@ -16,6 +16,7 @@ from .compression import CompressionResult, ContextCompressor
 from .context import ExecutionContext, Step
 from .llm import BaseLLM, LLMResponse, MockLLM, OpenAILLM, ToolCall, Usage
 from .memory import LongTermMemory, ShortTermMemory
+from .safety import ScanResult, ToolOutputGuard
 from .tools import BaseTool, FunctionTool, ToolRegistry, tool
 
 __version__ = "0.1.0"
@@ -35,6 +36,8 @@ __all__ = [
     "LongTermMemory",
     "ContextCompressor",
     "CompressionResult",
+    "ToolOutputGuard",
+    "ScanResult",
     "BaseTool",
     "FunctionTool",
     "ToolRegistry",

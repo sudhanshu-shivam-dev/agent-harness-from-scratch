@@ -9,6 +9,7 @@ and reason about, and it is where the budget guardrail is enforced.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +19,7 @@ class Step:
     """One iteration of the ReAct loop: thought -> action -> observation."""
 
     index: int
+    id: str = ""  # correlation id: "{run_id}-{index}"
     thought: str = ""
     action: Optional[Dict[str, Any]] = None  # {"name": str, "arguments": dict}
     observation: Optional[str] = None
@@ -26,6 +28,7 @@ class Step:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "index": self.index,
+            "id": self.id,
             "thought": self.thought,
             "action": self.action,
             "observation": self.observation,
@@ -38,6 +41,8 @@ class ExecutionContext:
     """Owns all mutable state for a single agent run.
 
     Attributes:
+        run_id: Short correlation id for this run; every step id derives from it,
+            so logs/traces/observations can be tied back to a single run.
         messages: The running chat transcript (OpenAI message dicts).
         state: Free-form scratch space for tools/agents to stash data.
         steps: The recorded trajectory, one :class:`Step` per loop iteration.
@@ -46,6 +51,7 @@ class ExecutionContext:
         tokens_used: Running total of tokens consumed across LLM calls.
     """
 
+    run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     messages: List[Dict[str, Any]] = field(default_factory=list)
     state: Dict[str, Any] = field(default_factory=dict)
     steps: List[Step] = field(default_factory=list)
@@ -66,7 +72,8 @@ class ExecutionContext:
     def new_step(self) -> Step:
         """Create, register, and return the next :class:`Step`."""
 
-        step = Step(index=len(self.steps))
+        index = len(self.steps)
+        step = Step(index=index, id=f"{self.run_id}-{index}")
         self.steps.append(step)
         return step
 
